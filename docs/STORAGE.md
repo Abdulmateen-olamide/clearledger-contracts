@@ -321,6 +321,7 @@ EscrowRecord {
     invoice_id: BytesN<32>,
     amount:     u128,      // USDC stroops
     locked_at:  u64,       // Unix timestamp
+    issuer:     Address,   // Lock-time issuer; sole recipient source of truth
 }
 ```
 
@@ -369,6 +370,9 @@ ledger's event stream via `funds_locked`, `released_to_issuer`,
 1. `lock()` creates an `EscrowRecord` and transfers USDC from pool → escrow.
 2. `release_to_issuer()` or `release_to_pool()` transfers USDC out and
    **removes** the `Locked` key (caller must re-lock for a new funding cycle).
+   `release_to_issuer()` treats `EscrowRecord.issuer` as the source of truth:
+   a caller-supplied address must equal it, and the transfer always goes to the
+   stored value.
 3. `handle_default()` returns locked USDC to the pool and **removes** the key.
 4. On removal, the TTL-granted entries also expire organically.
 

@@ -183,7 +183,8 @@ impl EscrowContract {
     /// * `env` - The Soroban environment.
     /// * `invoice_id` - The invoice ID being locked.
     /// * `amount` - The amount to lock.
-    /// * `issuer` - The invoice issuer address authorized to receive released funds.
+    /// * `issuer` - The invoice issuer address authorized to receive released
+    ///   funds. Recorded as the sole source of truth for `release_to_issuer`.
     ///
     /// # Auth
     /// Requires authorization from the configured pool contract.
@@ -238,16 +239,25 @@ impl EscrowContract {
     /// # Arguments
     /// * `env` - The Soroban environment.
     /// * `invoice_id` - The invoice whose escrow is released.
-    /// * `issuer` - The issuer address to receive funds.
+    /// * `issuer` - Caller-supplied issuer address. The parameter is retained
+    ///   for ABI compatibility; it must equal the issuer recorded by `lock`.
     ///
     /// # Auth
     /// Requires authorization from the configured pool contract.
     ///
+    /// # Trust boundary
+    /// The issuer stored in the [`EscrowRecord`] at lock time is the sole
+    /// source of truth. A caller-supplied `issuer` is accepted only when it
+    /// equals that stored address, and the token transfer and emitted event
+    /// always use the stored address. A mismatch reverts with
+    /// `InvalidRecipient` before any token transfer or storage mutation.
+    ///
     /// # Panics
     /// * `NotInitialized` if the contract has not been initialized.
     /// * `NotFound` if no escrow record exists for the invoice.
-    /// * `InvalidRecipient` if issuer is escrow or pool contract address.
-    /// * `InvalidRecipient` if issuer does not match the stored issuer address.
+    /// * `InvalidRecipient` if `issuer` does not match the stored issuer address.
+    /// * `InvalidRecipient` if the stored issuer is the escrow or pool contract address.
+    /// * `InvalidAmount` if the stored amount exceeds `i128::MAX`.
     ///
     /// # Returns
     /// * `bool` - `true` when funds are released.
@@ -260,10 +270,6 @@ impl EscrowContract {
         require_not_paused(&env);
         let pool = Self::require_pool_auth(&env);
 
-        if issuer == env.current_contract_address() || issuer == pool {
-            panic_with_error!(&env, EscrowError::InvalidRecipient);
-        }
-
         let key = DataKey::Locked(invoice_id.clone());
         let record: EscrowRecord = env
             .storage()
@@ -275,13 +281,18 @@ impl EscrowContract {
             panic_with_error!(&env, EscrowError::InvalidRecipient);
         }
 
+        let stored_issuer = record.issuer.clone();
+        if stored_issuer == env.current_contract_address() || stored_issuer == pool {
+            panic_with_error!(&env, EscrowError::InvalidRecipient);
+        }
+
         let usdc = Self::usdc_client(&env);
         if record.amount > i128::MAX as u128 {
             panic_with_error!(&env, EscrowError::InvalidAmount);
         }
         usdc.transfer(
             &env.current_contract_address(),
-            &issuer,
+            &stored_issuer,
             &(record.amount as i128),
         );
 
@@ -294,7 +305,7 @@ impl EscrowContract {
         );
         env.storage().persistent().remove(&key);
         Self::extend_instance_ttl(&env);
-        events::released_to_issuer(&env, &invoice_id, &issuer, record.amount);
+        events::released_to_issuer(&env, &invoice_id, &stored_issuer, record.amount);
         true
     }
 
