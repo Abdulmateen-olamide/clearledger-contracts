@@ -7320,4 +7320,3 @@ fn prop_lp_operation_sequences_conserve_shares_and_deposits() {
         )
         .unwrap();
 }
-
