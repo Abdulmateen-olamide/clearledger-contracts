@@ -22,12 +22,7 @@ pub fn buyer_registered(env: &Env, address: &Address) {
 
 /// Emitted by `revoke`. The profile role is indexed in `topic[2]`; the
 /// machine-readable revocation reason is encoded in the event data.
-pub fn address_revoked(
-    env: &Env,
-    address: &Address,
-    role: &Role,
-    reason: &RevocationReason,
-) {
+pub fn address_revoked(env: &Env, address: &Address, role: &Role, reason: &RevocationReason) {
     env.events().publish(
         (
             Symbol::new(env, "address_revoked"),
@@ -35,8 +30,6 @@ pub fn address_revoked(
             role.clone(),
         ),
         reason.clone(),
-    );
-}
     );
 }
 

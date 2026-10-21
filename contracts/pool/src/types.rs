@@ -64,7 +64,6 @@ pub struct LPPosition {
     pub deposit_count: u32,
 }
 
-
 /// Eligibility or capacity reason reported by [`FundingPreview`].
 ///
 /// The variants mirror the first check `fund_invoice` would fail, so a caller
@@ -132,6 +131,7 @@ pub struct FundingPreview {
     pub eligible: bool,
     /// The first eligibility or capacity reason that would stop `fund_invoice`.
     pub status: FundingStatus,
+}
 
 /// Read-only quote returned by `preview_withdraw`.
 #[contracttype]

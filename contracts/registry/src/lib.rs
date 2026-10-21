@@ -708,11 +708,7 @@ impl RegistryContract {
     /// ```ignore
     /// let result = client.revoke_with_reason(&issuer, &RevocationReason::Fraud);
     /// ```
-    pub fn revoke_with_reason(
-        env: Env,
-        address: Address,
-        reason: RevocationReason,
-    ) -> bool {
+    pub fn revoke_with_reason(env: Env, address: Address, reason: RevocationReason) -> bool {
         require_not_paused(&env);
         let admin = Self::require_admin(&env);
         admin.require_auth();
@@ -732,7 +728,7 @@ impl RegistryContract {
         env.storage()
             .persistent()
             .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
-        events::address_revoked(&env, &address, &role, &reason)
+        events::address_revoked(&env, &address, &role, &reason);
         Self::extend_instance_ttl(&env);
         true
     }
