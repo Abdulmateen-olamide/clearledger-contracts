@@ -1680,6 +1680,21 @@ fn test_partial_repayment_then_default_pool_loss_calculation() {
     assert_eq!(returned, deposit_amount - expected_loss);
 }
 
+#[test]
+fn test_repeated_pool_default_does_not_change_totals_or_invoice_state() {
+    let lifecycle = setup_fee_lifecycle();
+    lifecycle.pool.deposit(&lifecycle.lp, &12_000_000_000);
+    let (invoice_id, due_date) = create_fee_lifecycle_invoice(&lifecycle);
+    lifecycle.env.ledger().set_timestamp(due_date + 60);
+    assert!(lifecycle.pool.handle_default(&invoice_id));
+    assert!(lifecycle.invoice.mark_defaulted(&invoice_id));
+    let first_stats = lifecycle.pool.get_stats();
+    let first_status = lifecycle.invoice.get_status(&invoice_id);
+    assert!(lifecycle.pool.try_handle_default(&invoice_id).is_err());
+    assert_eq!(lifecycle.pool.get_stats(), first_stats);
+    assert_eq!(lifecycle.invoice.get_status(&invoice_id), first_status);
+}
+
 /// Opt-in measurement only: normal correctness tests do not rewrite baselines.
 #[test]
 #[ignore = "run scripts/report-budgets.sh to generate a native testutils report"]
