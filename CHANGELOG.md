@@ -53,6 +53,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `invoice`: `submit_attestation` now returns the typed
+  `InvoiceError::AgentRegistryNotConfigured` (#29) when the agent-registry
+  contract has not been wired, instead of the generic `NotFound` (#2);
+  `list_for_financing` returns the same error if an attestation exists but
+  the agent registry is unset
 - `registry`: the `profile_verified` event now includes the authorizing admin
   as `topic[3]`, so indexers can attribute verification status changes. The
   existing profile and role topics plus the `bool` status data are unchanged

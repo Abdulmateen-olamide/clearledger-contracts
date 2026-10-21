@@ -56,4 +56,10 @@ pub enum InvoiceError {
     /// `add_supported_asset` was given an address that aliases `admin`, this
     /// contract, or one of the wired contract roles instead of a token.
     InvalidAsset = 34,
+    /// `submit_attestation` or `list_for_financing` was called before the
+    /// admin configured the agent-registry contract via
+    /// [`InvoiceContract::set_agent_registry_contract`](crate::InvoiceContract::set_agent_registry_contract).
+    /// Code 29 is taken by `AttestationExpired`, so this variant uses the next
+    /// free discriminant.
+    AgentRegistryNotConfigured = 35,
 }
