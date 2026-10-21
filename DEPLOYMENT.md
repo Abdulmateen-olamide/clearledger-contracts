@@ -16,6 +16,10 @@ smart contracts on Stellar.
 The repo ships `rust-toolchain.toml` pinning channel `1.85.0` and
 target `wasm32v1-none`. `rustup` picks it up automatically.
 
+For exact commands to build release WASM, compare local and deployed
+hashes, inspect contract specs, and run the tests, see the
+[WASM artifact contributor guide](docs/developer-guide/wasm-artifacts.md).
+
 ### Environment Variables
 
 Copy `.env.example` to `.env` and fill in:
@@ -315,6 +319,8 @@ running verification; a different local build is expected to fail the hash
 check.
 
 You can also verify on [Stellar Expert Testnet](https://stellar.expert/explorer/testnet).
+To confirm the deployed bytecode matches your local build, compare hashes as
+described in the [WASM artifact contributor guide](docs/developer-guide/wasm-artifacts.md#compare-wasm-hashes).
 
 ## Contract Address Lifecycle & Rotation Policy
 
