@@ -1294,6 +1294,7 @@ impl PoolContract {
         let _: bool =
             env.invoke_contract(&invoice_contract, &Symbol::new(&env, "mark_funded"), args);
 
+        events::invoice_funded_v1(&env, &invoice_id, funded_amount);
         events::invoice_funded(&env, &invoice_id, funded_amount);
         Self::extend_instance_ttl(&env);
         true
