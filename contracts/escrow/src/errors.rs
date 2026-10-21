@@ -32,4 +32,10 @@ pub enum EscrowError {
     ///
     /// Codes 9-12 are reserved by open issues #83 and #50.
     InvalidRetention = 13,
+    /// Returned when `initialize` is given a pool/admin address that aliases
+    /// another configured contract role.
+    InvalidContractAddress = 16,
+    /// Returned when `initialize` is given a `usdc_asset` that aliases the
+    /// admin, pool, or this escrow contract instead of a distinct token.
+    InvalidAsset = 17,
 }

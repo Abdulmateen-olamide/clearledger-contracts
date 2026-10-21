@@ -387,7 +387,7 @@ fn test_initialize_twice_panics() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #8)")]
+#[should_panic(expected = "Error(Contract, #15)")]
 fn test_initialize_panics_when_pool_equals_usdc() {
     let env = Env::default();
     env.mock_all_auths();
@@ -400,7 +400,7 @@ fn test_initialize_panics_when_pool_equals_usdc() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #8)")]
+#[should_panic(expected = "Error(Contract, #14)")]
 fn test_initialize_panics_when_pool_equals_admin() {
     let env = Env::default();
     env.mock_all_auths();
@@ -413,7 +413,7 @@ fn test_initialize_panics_when_pool_equals_admin() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #8)")]
+#[should_panic(expected = "Error(Contract, #15)")]
 fn test_initialize_panics_when_usdc_equals_admin() {
     let env = Env::default();
     env.mock_all_auths();
