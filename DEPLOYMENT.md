@@ -28,9 +28,12 @@ Copy `.env.example` to `.env` and fill in:
 | Variable | Description |
 |----------|-------------|
 | `DEPLOYER_ACCOUNT` | Key alias for the deployer (default: `deployer`) |
-| `USDC_ISSUER` | Stellar address of the USDC issuer on testnet |
+| `USDC_ISSUER` | Legacy name: selected Testnet asset SAC **C-address**, not the issuing G-account |
 | `XLM_ASSET` | Native XLM SAC contract address. Testnet: `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`. See [Native XLM](docs/NATIVE_XLM.md). |
 | `DEPLOY_XLM` | Set to `true` to opt in to experimental XLM contracts; defaults to the supported USDC workflow |
+
+See [Testnet asset configuration](docs/testnet-assets.md) for issuer identity,
+SAC addresses, precision, trustlines and explorer references.
 
 ## Native XLM via the Stellar Asset Contract
 
