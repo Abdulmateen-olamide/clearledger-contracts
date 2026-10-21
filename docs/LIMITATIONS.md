@@ -327,7 +327,9 @@ are provided where available.
 
 ### Smart Contracts
 
-- Multi-sig admin (3-of-5 Stellar signers)
+- Multisig-aware deployment automation. Account-level 3-of-5 admin is
+  documented in [MULTISIG_ADMIN.md](MULTISIG_ADMIN.md), but the deployment
+  scripts still initialize contracts with the deployer address.
 - LP-governed invoice funding (stake LP tokens to vote on invoices). Design
   proposal: [NEW_DESIGN.md](NEW_DESIGN.md) (issue #718)
 - Dynamic utilization-based interest rate model
@@ -344,6 +346,7 @@ are provided where available.
 - Timelocked or multisig contract upgrades. Admin-only `upgrade` entry points
   already exist on `invoice` and `escrow`; `registry`, `pool`, and
   `pool_factory` are not upgradeable through a contract entry point. See
+  [MULTISIG_ADMIN.md](MULTISIG_ADMIN.md#contract-authority-map) and
   [THREAT_MODEL.md](./THREAT_MODEL.md#upgrade-powers).
 
 > **Note:** Partial repayments are now supported on the **escrow** path
