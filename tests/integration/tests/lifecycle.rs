@@ -10,7 +10,7 @@ use clearledger_invoice::{InvoiceContract, InvoiceContractClient, InvoiceStatus}
 use clearledger_pool::{
     PoolContract, PoolContractClient, DEFAULT_MIN_INITIAL_DEPOSIT, DEFAULT_SHARE_DECIMALS,
 };
-use clearledger_registry::{RegistryContract, RegistryContractClient};
+use clearledger_registry::{RegistryContract, RegistryContractClient, VerificationStatus};
 
 // --------------- Mock USDC Token ---------------
 
@@ -76,6 +76,7 @@ struct FeeLifecycle {
     usdc_id: Address,
     invoice: InvoiceContractClient<'static>,
     pool: PoolContractClient<'static>,
+    registry: RegistryContractClient<'static>,
     escrow_id: Address,
     pool_id: Address,
     issuer: Address,
@@ -153,6 +154,7 @@ fn setup_fee_lifecycle() -> FeeLifecycle {
         usdc_id,
         invoice,
         pool,
+        registry,
         escrow_id,
         pool_id,
         issuer,
@@ -516,7 +518,10 @@ fn default_via_pool(lifecycle: &FeeLifecycle, invoice_id: &BytesN<32>) -> bool {
     defaulted
 }
 
-fn expected_repayment_split(invoice: &clearledger_invoice::Invoice, repaid_at: u64) -> (u128, u128) {
+fn expected_repayment_split(
+    invoice: &clearledger_invoice::Invoice,
+    repaid_at: u64,
+) -> (u128, u128) {
     let funded_at = invoice
         .funded_at
         .expect("funded invoice should record its funding timestamp");
@@ -1328,7 +1333,10 @@ fn test_cross_contract_partial_repayment_zero_rejected_without_state_change() {
     let buyer_before = token.balance(&lifecycle.buyer);
     let escrow_before = token.balance(&lifecycle.escrow_id);
 
-    assert!(lifecycle.invoice.try_repay_partial(&invoice_id, &0).is_err());
+    assert!(lifecycle
+        .invoice
+        .try_repay_partial(&invoice_id, &0)
+        .is_err());
 
     let invoice_after = lifecycle.invoice.get(&invoice_id);
     let stats_after = lifecycle.pool.get_stats();
@@ -1339,8 +1347,14 @@ fn test_cross_contract_partial_repayment_zero_rejected_without_state_change() {
         invoice_before.remaining_balance
     );
     assert_eq!(stats_after.total_funded, stats_before.total_funded);
-    assert_eq!(stats_after.active_invoice_count, stats_before.active_invoice_count);
-    assert_eq!(stats_after.total_yield_distributed, stats_before.total_yield_distributed);
+    assert_eq!(
+        stats_after.active_invoice_count,
+        stats_before.active_invoice_count
+    );
+    assert_eq!(
+        stats_after.total_yield_distributed,
+        stats_before.total_yield_distributed
+    );
     assert_eq!(token.balance(&lifecycle.buyer), buyer_before);
     assert_eq!(token.balance(&lifecycle.escrow_id), escrow_before);
 }
@@ -1368,8 +1382,14 @@ fn test_cross_contract_partial_repayment_minimum_stroop_accepted() {
 
     let stats_after = lifecycle.pool.get_stats();
     assert_eq!(stats_after.total_funded, stats_before.total_funded);
-    assert_eq!(stats_after.active_invoice_count, stats_before.active_invoice_count);
-    assert_eq!(stats_after.total_yield_distributed, stats_before.total_yield_distributed);
+    assert_eq!(
+        stats_after.active_invoice_count,
+        stats_before.active_invoice_count
+    );
+    assert_eq!(
+        stats_after.total_yield_distributed,
+        stats_before.total_yield_distributed
+    );
     assert_eq!(
         token.balance(&lifecycle.escrow_id),
         invoice_before.funded_amount as i128 + 1
@@ -1477,8 +1497,14 @@ fn test_cross_contract_partial_repayment_over_balance_rejected_without_state_cha
         invoice_before.remaining_balance
     );
     assert_eq!(stats_after.total_funded, stats_before.total_funded);
-    assert_eq!(stats_after.active_invoice_count, stats_before.active_invoice_count);
-    assert_eq!(stats_after.total_yield_distributed, stats_before.total_yield_distributed);
+    assert_eq!(
+        stats_after.active_invoice_count,
+        stats_before.active_invoice_count
+    );
+    assert_eq!(
+        stats_after.total_yield_distributed,
+        stats_before.total_yield_distributed
+    );
     assert_eq!(token.balance(&lifecycle.buyer), buyer_before);
     assert_eq!(token.balance(&lifecycle.escrow_id), escrow_before);
 }
@@ -2259,7 +2285,10 @@ fn test_fund_invoice_rolls_back_atomically_when_issuer_payout_fails() {
         &lifecycle.issuer,
         &invoice_id,
     );
-    assert!(result.is_err(), "issuer payout failure must revert the call");
+    assert!(
+        result.is_err(),
+        "issuer payout failure must revert the call"
+    );
 
     let invoice_after = lifecycle.invoice.get(&invoice_id);
     assert_eq!(invoice_after.status, invoice_before.status);
@@ -2293,10 +2322,7 @@ fn test_fund_invoice_rolls_back_atomically_when_issuer_payout_fails() {
 
     assert_eq!(escrow.get_locked(&invoice_id), locked_before);
     assert_eq!(escrow.get_locked(&invoice_id), 0);
-    assert_eq!(
-        escrow.get_history(&invoice_id).len(),
-        history_len_before
-    );
+    assert_eq!(escrow.get_history(&invoice_id).len(), history_len_before);
     assert_eq!(token.balance(&lifecycle.issuer), issuer_before);
     assert_eq!(token.balance(&lifecycle.escrow_id), escrow_before);
     assert_eq!(token.balance(&lifecycle.pool_id), pool_before);
@@ -2324,10 +2350,7 @@ fn test_full_repayment_blocks_default_and_second_settlement() {
         InvoiceStatus::Repaid as u32
     );
     assert_eq!(lifecycle.invoice.get_remaining_balance(&invoice_id), 0);
-    assert_eq!(
-        lifecycle.invoice.get_repaid_amount(&invoice_id),
-        face_value
-    );
+    assert_eq!(lifecycle.invoice.get_repaid_amount(&invoice_id), face_value);
     assert_eq!(lifecycle.pool.get_funded_amount(&invoice_id), None);
     assert_eq!(escrow.get_locked(&invoice_id), 0);
 
@@ -2420,8 +2443,7 @@ fn test_default_blocks_repayment_and_second_settlement() {
     assert_eq!(stats_after_default.active_invoice_count, 0);
     assert_eq!(stats_after_default.total_loss_realised, funded_amount);
     assert_eq!(
-        stats_after_default.total_deposits,
-        DEFAULT_LIFECYCLE_DEPOSIT,
+        stats_after_default.total_deposits, DEFAULT_LIFECYCLE_DEPOSIT,
         "default recovery must not double-count the write-off against LP deposits"
     );
     // The escrow advance is returned exactly once, restoring the deposited
@@ -2550,8 +2572,7 @@ fn test_partial_repayment_then_default_preserves_balance_without_double_settleme
     assert_eq!(stats_after_default.total_funded, 0);
     assert_eq!(stats_after_default.active_invoice_count, 0);
     assert_eq!(
-        stats_after_default.total_deposits,
-        stats_before_default.total_deposits,
+        stats_after_default.total_deposits, stats_before_default.total_deposits,
         "default must not reduce LP deposits a second time"
     );
     // Current single-settlement accounting: the originating funded principal
@@ -2696,4 +2717,273 @@ fn report_core_workflow_budgets() {
     // Do not publish a partial report if any workflow failed above.
     std::fs::write(path, report).expect("write budget report");
     std::println!("Budget report written to {}", path.display());
+}
+
+// --------------- Registry Revocation Integration Tests (Issue #100) ---------------
+//
+// Revocation is prospective: `invoice.create`, `invoice.list_for_financing`, and
+// `pool.fund_invoice` each re-check the real registry before committing new
+// business. An invoice that was already funded is deliberately *not* unwound by
+// a later revocation, because pool capital is already committed and repayment
+// terms are fixed. The tests below pin both sides of that rule against the real
+// registry, invoice, and pool contracts.
+
+fn create_attested_invoice(lifecycle: &FeeLifecycle, face_value: u128) -> (BytesN<32>, u64) {
+    let due_date = lifecycle.env.ledger().timestamp() + 30 * 86400;
+    let invoice_id = lifecycle.invoice.create(
+        &lifecycle.issuer,
+        &lifecycle.buyer,
+        &face_value,
+        &due_date,
+        &lifecycle.usdc_id,
+    );
+    attest_invoice(&lifecycle.env, &lifecycle.invoice, &invoice_id);
+    (invoice_id, due_date)
+}
+
+#[test]
+fn test_revoked_issuer_cannot_create_invoice() {
+    let lifecycle = setup_fee_lifecycle();
+    lifecycle.registry.revoke(&lifecycle.issuer);
+    assert_eq!(
+        lifecycle
+            .registry
+            .get_verification_status(&lifecycle.issuer),
+        VerificationStatus::Revoked
+    );
+    assert!(!lifecycle.registry.is_verified(&lifecycle.issuer));
+
+    let face_value = 1_200_000_000u128;
+    let due_date = lifecycle.env.ledger().timestamp() + 30 * 86400;
+    let result = lifecycle.invoice.try_create(
+        &lifecycle.issuer,
+        &lifecycle.buyer,
+        &face_value,
+        &due_date,
+        &lifecycle.usdc_id,
+    );
+    assert!(result.is_err());
+    assert!(
+        std::format!("{result:?}").contains("#4"),
+        "revoked issuer should fail invoice.create with IssuerNotVerified: {result:?}"
+    );
+}
+
+#[test]
+fn test_revoked_buyer_cannot_create_invoice() {
+    let lifecycle = setup_fee_lifecycle();
+    lifecycle.registry.revoke(&lifecycle.buyer);
+    assert_eq!(
+        lifecycle.registry.get_verification_status(&lifecycle.buyer),
+        VerificationStatus::Revoked
+    );
+    assert!(!lifecycle.registry.is_verified(&lifecycle.buyer));
+
+    let face_value = 1_200_000_000u128;
+    let due_date = lifecycle.env.ledger().timestamp() + 30 * 86400;
+    let result = lifecycle.invoice.try_create(
+        &lifecycle.issuer,
+        &lifecycle.buyer,
+        &face_value,
+        &due_date,
+        &lifecycle.usdc_id,
+    );
+    assert!(result.is_err());
+    assert!(
+        std::format!("{result:?}").contains("#5"),
+        "revoked buyer should fail invoice.create with BuyerNotVerified: {result:?}"
+    );
+}
+
+#[test]
+fn test_revocation_after_create_blocks_listing() {
+    let lifecycle = setup_fee_lifecycle();
+
+    // Issuer was verified at create() time, then revoked before listing.
+    let (issuer_invoice, _) = create_attested_invoice(&lifecycle, 1_200_000_000);
+    lifecycle.registry.revoke(&lifecycle.issuer);
+    let issuer_list = lifecycle
+        .invoice
+        .try_list_for_financing(&issuer_invoice, &200);
+    assert!(issuer_list.is_err());
+    assert!(
+        std::format!("{issuer_list:?}").contains("#4"),
+        "revoked issuer should fail list_for_financing with IssuerNotVerified: {issuer_list:?}"
+    );
+    assert_eq!(
+        lifecycle.invoice.get_status(&issuer_invoice),
+        InvoiceStatus::Created as u32,
+        "failed listing must not advance the invoice past Created"
+    );
+    lifecycle.registry.reinstate(&lifecycle.issuer);
+    assert!(lifecycle.invoice.list_for_financing(&issuer_invoice, &200));
+
+    // Repeat with a buyer revocation between create() and listing.
+    let (buyer_invoice, _) = create_attested_invoice(&lifecycle, 1_200_000_000);
+    lifecycle.registry.revoke(&lifecycle.buyer);
+    let buyer_list = lifecycle
+        .invoice
+        .try_list_for_financing(&buyer_invoice, &200);
+    assert!(buyer_list.is_err());
+    assert!(
+        std::format!("{buyer_list:?}").contains("#5"),
+        "revoked buyer should fail list_for_financing with BuyerNotVerified: {buyer_list:?}"
+    );
+    assert_eq!(
+        lifecycle.invoice.get_status(&buyer_invoice),
+        InvoiceStatus::Created as u32,
+        "failed listing must not advance the invoice past Created"
+    );
+    lifecycle.registry.reinstate(&lifecycle.buyer);
+    assert!(lifecycle.invoice.list_for_financing(&buyer_invoice, &200));
+}
+
+#[test]
+fn test_revocation_after_listing_blocks_funding() {
+    let lifecycle = setup_fee_lifecycle();
+    lifecycle.pool.deposit(&lifecycle.lp, &10_000_000_000u128);
+
+    // Issuer was verified at listing time, then revoked before funding.
+    let (issuer_invoice, _) = create_attested_invoice(&lifecycle, 1_200_000_000);
+    lifecycle.invoice.list_for_financing(&issuer_invoice, &200);
+    lifecycle.registry.revoke(&lifecycle.issuer);
+    let stats_before = lifecycle.pool.get_stats();
+    let issuer_funding = lifecycle.pool.try_fund_invoice(&issuer_invoice);
+    assert!(issuer_funding.is_err());
+    assert!(
+        std::format!("{issuer_funding:?}").contains("#18"),
+        "revoked issuer should fail fund_invoice with IssuerNotVerified: {issuer_funding:?}"
+    );
+    let stats_after = lifecycle.pool.get_stats();
+    assert_eq!(stats_after.total_deposits, stats_before.total_deposits);
+    assert_eq!(stats_after.total_funded, stats_before.total_funded);
+    assert_eq!(
+        stats_after.active_invoice_count,
+        stats_before.active_invoice_count
+    );
+    assert_eq!(
+        stats_after.available_liquidity,
+        stats_before.available_liquidity
+    );
+    assert_eq!(
+        lifecycle.invoice.get_status(&issuer_invoice),
+        InvoiceStatus::Listed as u32,
+        "failed funding must leave the invoice listed"
+    );
+    lifecycle.registry.reinstate(&lifecycle.issuer);
+    assert!(lifecycle.pool.fund_invoice(&issuer_invoice));
+
+    // Repeat with a buyer revocation between listing and funding.
+    let (buyer_invoice, _) = create_attested_invoice(&lifecycle, 1_200_000_000);
+    lifecycle.invoice.list_for_financing(&buyer_invoice, &200);
+    lifecycle.registry.revoke(&lifecycle.buyer);
+    let stats_before = lifecycle.pool.get_stats();
+    let buyer_funding = lifecycle.pool.try_fund_invoice(&buyer_invoice);
+    assert!(buyer_funding.is_err());
+    assert!(
+        std::format!("{buyer_funding:?}").contains("#19"),
+        "revoked buyer should fail fund_invoice with BuyerNotVerified: {buyer_funding:?}"
+    );
+    let stats_after = lifecycle.pool.get_stats();
+    assert_eq!(stats_after.total_deposits, stats_before.total_deposits);
+    assert_eq!(stats_after.total_funded, stats_before.total_funded);
+    assert_eq!(
+        stats_after.active_invoice_count,
+        stats_before.active_invoice_count
+    );
+    assert_eq!(
+        stats_after.available_liquidity,
+        stats_before.available_liquidity
+    );
+    assert_eq!(
+        lifecycle.invoice.get_status(&buyer_invoice),
+        InvoiceStatus::Listed as u32,
+        "failed funding must leave the invoice listed"
+    );
+    lifecycle.registry.reinstate(&lifecycle.buyer);
+    assert!(lifecycle.pool.fund_invoice(&buyer_invoice));
+}
+
+#[test]
+fn test_revocation_after_funding_does_not_unwind_invoice() {
+    let lifecycle = setup_fee_lifecycle();
+    lifecycle.pool.deposit(&lifecycle.lp, &10_000_000_000u128);
+
+    let (invoice_id, due_date) = create_attested_invoice(&lifecycle, 1_200_000_000);
+    lifecycle.invoice.list_for_financing(&invoice_id, &200);
+    assert!(lifecycle.pool.fund_invoice(&invoice_id));
+    assert_eq!(
+        lifecycle.invoice.get_status(&invoice_id),
+        InvoiceStatus::Funded as u32
+    );
+
+    // Both parties are revoked only after pool capital is already committed.
+    lifecycle.registry.revoke(&lifecycle.issuer);
+    lifecycle.registry.revoke(&lifecycle.buyer);
+    assert_eq!(
+        lifecycle
+            .registry
+            .get_verification_status(&lifecycle.issuer),
+        VerificationStatus::Revoked
+    );
+    assert_eq!(
+        lifecycle.registry.get_verification_status(&lifecycle.buyer),
+        VerificationStatus::Revoked
+    );
+    assert!(!lifecycle.registry.is_verified(&lifecycle.issuer));
+    assert!(!lifecycle.registry.is_verified(&lifecycle.buyer));
+
+    // Documented rule: revocation is not retroactive. Shipping, delivery
+    // confirmation, and repayment all proceed for the in-flight invoice.
+    assert!(lifecycle.invoice.mark_shipped(&invoice_id));
+    assert_eq!(
+        lifecycle.invoice.get_status(&invoice_id),
+        InvoiceStatus::Active as u32
+    );
+    assert!(lifecycle
+        .invoice
+        .confirm_delivery(&invoice_id, &lifecycle.issuer));
+    assert!(lifecycle
+        .invoice
+        .confirm_delivery(&invoice_id, &lifecycle.buyer));
+    assert_eq!(
+        lifecycle.invoice.get_status(&invoice_id),
+        InvoiceStatus::Confirmed as u32
+    );
+    lifecycle.env.ledger().set_timestamp(due_date);
+    assert!(lifecycle.invoice.repay(&invoice_id));
+    assert_eq!(
+        lifecycle.invoice.get_status(&invoice_id),
+        InvoiceStatus::Repaid as u32
+    );
+}
+
+#[test]
+fn test_revoke_requires_admin_auth_and_registered_profile() {
+    let lifecycle = setup_fee_lifecycle();
+
+    // Revoking an address that was never registered is a malformed request.
+    let unknown = Address::generate(&lifecycle.env);
+    let missing = lifecycle.registry.try_revoke(&unknown);
+    assert!(missing.is_err());
+    assert!(
+        std::format!("{missing:?}").contains("#3"),
+        "revoking an unregistered profile should fail with NotFound: {missing:?}"
+    );
+
+    // Without the admin authorization, revoke must be rejected.
+    lifecycle.env.set_auths(&[]);
+    let unauthorized = lifecycle.registry.try_revoke(&lifecycle.issuer);
+    assert!(unauthorized.is_err());
+    assert!(
+        std::format!("{unauthorized:?}").contains("Auth"),
+        "unauthorized revoke should fail with an auth error: {unauthorized:?}"
+    );
+    assert!(lifecycle.registry.is_verified(&lifecycle.issuer));
+    assert_eq!(
+        lifecycle
+            .registry
+            .get_verification_status(&lifecycle.issuer),
+        VerificationStatus::Verified
+    );
 }
