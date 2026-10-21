@@ -925,7 +925,7 @@ impl RegistryContract {
         env.storage()
             .persistent()
             .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
-        events::profile_verified(&env, &address, verify, &role);
+        events::profile_verified(&env, &address, verify, &role, &admin);
         Self::extend_instance_ttl(&env);
         true
     }

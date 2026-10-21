@@ -41,16 +41,17 @@ pub fn batch_registered(env: &Env, registered: u32, skipped: u32) {
 }
 
 /// Emitted by `verify_profile`. `role` is indexed in `topic[2]` so indexers
-/// can classify the profile without an extra `get_profile` read. `data`
-/// remains the `bool` verification status; the authorizing admin added by
-/// #165 should be appended after `role` (e.g. `topic[3]`) to keep this ABI
-/// additive.
-pub fn profile_verified(env: &Env, address: &Address, status: bool, role: &Role) {
+/// can classify the profile without an extra `get_profile` read. The stored
+/// contract admin that authorized the change is appended as `topic[3]`, and
+/// `data` remains the `bool` verification status. Both additions are
+/// additive: existing topic positions and the data payload are unchanged.
+pub fn profile_verified(env: &Env, address: &Address, status: bool, role: &Role, admin: &Address) {
     env.events().publish(
         (
             Symbol::new(env, "profile_verified"),
             address.clone(),
             role.clone(),
+            admin.clone(),
         ),
         status,
     );

@@ -37,7 +37,7 @@ fn assert_last_event_role(
     let events = env.events().all();
     let (contract, topics, _data) = events.get(events.len() - 1).unwrap();
     assert_eq!(contract, client.address);
-    assert_eq!(topics.len(), 3);
+    assert!(topics.len() >= 3);
     assert_eq!(
         Symbol::try_from_val(env, &topics.get(0).unwrap()).unwrap(),
         Symbol::new(env, name)
@@ -391,7 +391,8 @@ fn test_reinstate_restores_verified_and_emits_event() {
                 (
                     Symbol::new(&env, "profile_verified"),
                     issuer.clone(),
-                    Role::Issuer
+                    Role::Issuer,
+                    admin.clone(),
                 )
                     .into_val(&env),
                 true.into_val(&env),
@@ -1236,6 +1237,61 @@ fn test_verify_profile_updates_status() {
 }
 
 #[test]
+fn test_verify_profile_emits_event_with_authorizing_admin() {
+    let (env, client) = setup();
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    let issuer = Address::generate(&env);
+    client.register_issuer(&issuer, &map![&env]);
+
+    client.verify_profile(&issuer, &true);
+
+    // The verification event indexes the profile and its role, then attributes
+    // the status change to the stored admin, with the new status as data.
+    assert_eq!(
+        env.events().all(),
+        vec![
+            &env,
+            (
+                client.address.clone(),
+                (Symbol::new(&env, "contract_initialized"), admin.clone()).into_val(&env),
+                ().into_val(&env),
+            ),
+            (
+                client.address.clone(),
+                (Symbol::new(&env, "issuer_registered"), issuer.clone()).into_val(&env),
+                ().into_val(&env),
+            ),
+            (
+                client.address.clone(),
+                (
+                    Symbol::new(&env, "profile_verified"),
+                    issuer.clone(),
+                    Role::Issuer,
+                    admin.clone(),
+                )
+                    .into_val(&env),
+                true.into_val(&env),
+            ),
+        ]
+    );
+
+    // Un-verifying reports `false` while attributing the same admin.
+    client.verify_profile(&issuer, &false);
+    let events = env.events().all();
+    let (_, topics, data) = events.get(events.len() - 1).unwrap();
+    let topics_val: Val = topics.into_val(&env);
+    let (symbol, profile, role, authorizer): (Symbol, Address, Role, Address) =
+        topics_val.try_into_val(&env).unwrap();
+    assert_eq!(symbol, Symbol::new(&env, "profile_verified"));
+    assert_eq!(profile, issuer);
+    assert_eq!(role, Role::Issuer);
+    assert_eq!(authorizer, admin);
+    let status: bool = bool::try_from_val(&env, &data).unwrap();
+    assert!(!status);
+}
+
+#[test]
 fn test_verify_profile_event_includes_issuer_role() {
     let (env, client) = setup();
     let admin = Address::generate(&env);
@@ -2071,7 +2127,8 @@ fn test_revoke_emits_event() {
                 (
                     Symbol::new(&env, "profile_verified"),
                     issuer.clone(),
-                    Role::Issuer
+                    Role::Issuer,
+                    admin.clone(),
                 )
                     .into_val(&env),
                 true.into_val(&env),

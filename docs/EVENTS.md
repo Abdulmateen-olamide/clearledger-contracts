@@ -823,7 +823,7 @@ Emitted when a batch registration completes.
 
 ### `profile_verified`
 
-Emitted when a profile's verification status is checked/updated.
+Emitted when a profile's verification status is updated by the admin.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -831,9 +831,14 @@ Emitted when a profile's verification status is checked/updated.
 | `topic[0]` | `Symbol` | `"profile_verified"` |
 | `topic[1]` | `Address` | Profile address |
 | `topic[2]` | `Role` | Profile role (`Issuer` or `Buyer`) |
+| `topic[3]` | `Address` | Authorizing admin (the stored `DataKey::Admin`) |
 | **Data** | `bool` | Verification status (true = verified) |
 
-**ABI note:** `Role` was added as an indexed `topic[2]`; `topic[0]`, `topic[1]` and the `bool` data payload are unchanged. The authorizing admin planned in PR #165 should be appended after the role (for example, as `topic[3]`) rather than reordering the existing topics or changing the data payload, so both changes remain additive and merge cleanly.
+**ABI note:** `Role` is indexed as `topic[2]` and the authorizing admin is
+appended as `topic[3]`. `topic[0]`, `topic[1]` and the `bool` data payload are
+unchanged, so both additions are additive: consumers matching on the original
+topics and data keep working while indexers can classify the profile and
+attribute each status change to the admin who authorized it.
 
 **Emitted by:** `verify_profile()` in `contracts/registry/src/lib.rs:711`
 

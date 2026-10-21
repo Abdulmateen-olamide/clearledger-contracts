@@ -53,6 +53,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `registry`: the `profile_verified` event now includes the authorizing admin
+  as `topic[3]`, so indexers can attribute verification status changes. The
+  existing profile and role topics plus the `bool` status data are unchanged
+  (#8)
 - `invoice`: documented and pinned the early-repayment discount rounding rule
   (#26). The pool's time-proportional discount is
   `floor(discount * elapsed / term)`, rounded down to the stroop with checked
