@@ -69,8 +69,6 @@ Get-Content $envFile | ForEach-Object {
         }
     }
 }
-$deployXlm = $env:DEPLOY_XLM -eq 'true'
-
 $stellarNetwork = [Environment]::GetEnvironmentVariable('STELLAR_NETWORK')
 if (-not $stellarNetwork) { $stellarNetwork = 'testnet' }
 $deployXlmValue = [Environment]::GetEnvironmentVariable('DEPLOY_XLM')
@@ -349,6 +347,9 @@ if ($deployXlm) {
     Invoke-Init "pool_xlm" $poolXlmId @("--", "initialize", "--admin", $deployerAddress, "--invoice_contract", $invoiceId, "--escrow_contract", $escrowXlmId, "--funding_asset", $xlmAsset, "--registry_contract", $registryId, "--treasury", $deployerAddress, "--min_initial_deposit", "10000000", "--share_name", "`"ClearLedger XLM Pool Shares`"", "--share_symbol", "`"TT-XLM`"", "--share_decimals", "7")
 } else {
     Write-Host "`n=== DEPLOY_XLM is false — skipping experimental XLM contracts ==="
+}
+else {
+    Write-Host "`n=== DEPLOY_XLM is not true - skipping experimental XLM contracts ==="
 }
 
 Write-Host "`n=== Wiring USDC pool_contract into invoice_contract ==="

@@ -1,15 +1,15 @@
 # Threat Model
 
 > **Updated:** 2026-10-20
-> **Applies to:** `registry`, `invoice`, `escrow`, `pool`, and `pool_factory`
-> contracts, plus the shared `clearledger-pause` helper.
-> **Network:** Stellar **Testnet only**. There are no Mainnet guarantees, no
-> formal audit, and no production-tested governance process.
+> **Applies to:** The four core Soroban contracts (`registry`, `invoice`,
+> `escrow`, `pool`), the `pool_factory`, and the shared `clearledger-pause`
+> library. **Stellar Testnet only.** There is no audited Mainnet deployment and
+> nothing in this document should be read as Mainnet readiness.
 
-This document describes the trust assumptions, authentication gates, and
-attack surfaces of the ClearLedger protocol as implemented in this repository.
-It is intended for security researchers, integrators, and contributors
-evaluating the protocol's risk profile.
+This document describes the trust assumptions, authentication gates, pause and
+recovery semantics, and attack surfaces of the ClearLedger protocol. It is
+intended for security researchers, integrators, and contributors evaluating the
+protocol's risk profile.
 
 Everything below is written against the testnet deployment model: assets have
 no real-world value, admin keys are ordinary Stellar accounts (not multisigs),
@@ -21,6 +21,8 @@ and the protocol must not be used with real funds.
 
 - [Trust Model](#trust-model)
 - [Authentication Gates](#authentication-gates)
+- [Pause & Recovery](#pause--recovery)
+- [Token Assumptions](#token-assumptions)
 - [Funding Authorization](#funding-authorization)
 - [Ownership Transfer](#ownership-transfer)
 - [Pause Controls](#pause-controls)
@@ -54,6 +56,11 @@ addresses that signed the corresponding `initialize()` call.
 | **Underwrite agent** | Off-chain signer registered in the external agent-registry contract. Its signed attestation unlocks listing. | Medium — trusted per-invoice risk attestation |
 | **Anonymous caller** | Any Stellar account calling a permissionless entry point. | None — no auth required |
 
+The bundled deploy scripts initialize every core contract with the same
+deployer address as admin (`scripts/deploy.sh`, `scripts/deploy.ps1`). Unless a
+multisig account is configured before deployment, one key controls all five
+admin roles.
+
 ### Trust Boundaries
 
 ```
@@ -85,12 +92,24 @@ addresses that signed the corresponding `initialize()` call.
 - A pool deployed through `register_asset` is initialized with the factory
   admin as both its admin and initial treasury
   (`contracts/pool_factory/src/lib.rs:127-159`).
+- The funding asset is a well-behaved SEP-41 token. The token contract, and the
+  issuer behind a classic Stellar asset, are trusted to move exactly the amount
+  requested and not to freeze or blacklist the settlement contracts. See
+  [Token Assumptions](#token-assumptions).
+- `invoice` only accepts funding records from its configured pool
+  (`mark_funded`), and `pool` only accepts settlement from its configured
+  invoice contract (`receive_repayment`, `receive_repayment_with_refund`,
+  `handle_default`).
+- Agent attestations depend on a separately deployed agent registry
+  (the `underwrite-contract` repository), configured through
+  `invoice.set_agent_registry_contract`. That external contract's admin and
+  agent set are part of the listing trust boundary.
 
 ---
 
 ## Authentication Gates
 
-Every state-changing function enforces one of the following patterns.
+Every state-changing function enforces one of these patterns.
 
 ### Pattern A — Self-auth (`address.require_auth()`)
 
@@ -176,25 +195,163 @@ dual-auth. It requires only the incoming admin's signature and is one-shot
 `pool_factory/src/lib.rs:52-60`). The first caller to initialize a freshly
 deployed instance chooses its admin.
 
-### Pattern E — Permissionless (no auth)
+This is **not** universal:
 
-| Function | Contract | Notes |
-|----------|----------|-------|
-| `fund_invoice`, `batch_fund_invoice` | Pool | Any caller can allocate pool capital to an eligible listed invoice |
-| `trigger_default` | Invoice | Any caller once `now >= due_date` and status is `Funded`/`Active`/`Confirmed` |
-| `submit_attestation` | Invoice | No caller auth; trust comes from the secp256k1 signature and agent registry |
-| `get_profile`, `is_verified`, `get_verification_status`, `get_admin`, `get_profile_count`, `list_profiles` | Registry | Read-only |
-| `list_profiles_page` | Registry | Read-only view |
-| All `get_*`, `get_by_*`, `get_counts`, `balance`, `total_supply`, `allowance`, `get_attestation` | Invoice, Pool, Escrow | Read-only |
-| `get_stats`, `get_lp_position`, `get_utilization_rate`, `get_usdc_asset` | Pool | Read-only views |
-| `get_locked`, `get_locked_at`, `get_history`, `get_history_page` | Escrow | Read-only views; retained history is bounded and paginated |
-| `get_funded_amount`, `get_expiry_window` | Invoice | Read-only views |
-| `expire_listing` | Invoice | Also callable by issuer (Pattern A) |
-| `get_pool_for_asset`, `get_aggregate_stats`, `list_assets` | Pool factory | Read-only |
+- `initialize` requires only the incoming admin's authorization, not a second
+  party. It is a single-auth bootstrap, protected by the already-initialized
+  check.
+- `escrow` has no ownership-transfer entry point. Its admin is fixed at
+  `initialize` unless the contract is upgraded.
+- `pool_factory` has no ownership-transfer entry point.
+- `registry.transfer_admin(new_admin)` requires only the current admin and
+  deliberately bypasses the dual-auth guarantee of `transfer_ownership`
+  (`contracts/registry/src/lib.rs`, `transfer_admin`). A compromised registry
+  admin can therefore hand the registry to an arbitrary address without that
+  address signing.
 
-Read-only views remain callable while a contract is paused.
+### Pattern E — Permissionless (no caller auth)
+
+**State-changing functions.** These are the calls with real trust
+implications. Any Stellar account can invoke them.
+
+| Function | Contract | Trust Implication |
+|----------|----------|-------------------|
+| `fund_invoice` | Pool | Commits pool capital to any `Listed` invoice that passes on-chain eligibility checks (asset match, registry verification, liquidity, utilization cap). LPs cannot veto individual invoices. |
+| `batch_fund_invoice` | Pool | Same as `fund_invoice`, up to 50 entries, stopping when pool capacity is exhausted. |
+| `trigger_default` | Invoice | At or after `due_date`, any caller can force a default. This calls `pool.handle_default` and `escrow.handle_default`, returns locked principal to the pool, and moves the invoice to `Defaulted`. A defaulted invoice can no longer be repaid through `repay`/`repay_partial`/`repay_early`. |
+| `submit_attestation` | Invoice | Anyone may relay a signed attestation. Trust comes from the secp256k1 signature recovering to an active agent in the external agent registry, not from the caller. One attestation per invoice. |
+
+`clearledger-pause` and `clearledger-ttl` are shared libraries, not deployed
+contracts. `pool_factory` exposes no pause switch.
+
+**Read-only views.** All views are permissionless and remain callable while a
+contract is paused:
+
+- **Registry:** `get_profile`, `is_verified`, `get_verification_status`,
+  `get_profile_count`, `list_profiles`, `get_admin`.
+- **Invoice:** `get`, `get_status`, `has_status_membership`, `get_face_value`,
+  `get_remaining_balance`, `get_repaid_amount`, `get_discount_bps`,
+  `get_funding_terms`, `get_funding_asset`, `get_issuer`, `get_buyer`,
+  `get_due_date`, `get_by_status`, `get_by_issuer`, `get_by_buyer`,
+  `get_invoice_count_by_issuer`, `get_invoice_count_by_buyer`, `get_counts`,
+  `get_expiry_window`, `get_attestation`, `is_supported_asset`,
+  `get_supported_asset_count`, `get_admin`, `get_registry_contract`,
+  `get_pool_contract`, `get_escrow_contract`, `get_agent_registry_contract`.
+- **Escrow:** `get_locked`, `get_locked_at`, `get_history`, `get_usdc_asset`,
+  `get_admin`, `get_pool_contract`.
+- **Pool:** `get_stats`, `get_lp_position`, `get_utilization_rate`,
+  `get_funding_asset`, `get_usdc_asset`, `get_admin`, `get_fee_bps`,
+  `get_treasury_address`, `get_protocol_fee_bps`, `get_treasury`,
+  `get_invoice_contract`, `get_escrow_contract`, `get_suggested_discount_bps`,
+  `get_funded_amount`, `preview_deposit`, `balance`, `total_supply`,
+  `allowance`, `name`, `symbol`, `decimals`.
+- **Pool factory:** `get_pool_for_asset`, `get_aggregate_stats`,
+  `list_assets`.
 
 ---
+
+## Pause & Recovery
+
+### Pause semantics
+
+Each core contract has its **own** pause flag, stored in that contract's
+instance storage under `clearledger_pause::PauseState::Paused`. The library is
+shared; the state is not global. Pausing the pool does not pause escrow,
+invoice, or registry.
+
+- `pause()` and `unpause()` are admin-only in `registry`, `invoice`, `escrow`,
+  and `pool`. An absent flag means unpaused; a freshly deployed contract starts
+  live.
+- `unpause()` is deliberately not guarded by `require_not_paused`, so a paused
+  contract can always be resumed by its admin.
+- While paused, read-only views still work. State-changing entry points revert
+  with `ContractPaused`.
+- Pause is **all-or-nothing**: it also blocks withdrawals, repayments, funding,
+  LP share transfers, and default settlement. It cannot be used to stop only
+  new deposits or only new funding.
+- Pause has no expiry or timelock. A malicious or compromised admin can pause
+  indefinitely, and a paused escrow/pool can hold user funds until unpause.
+
+Two state-changing paths are **not** covered by the pause flag:
+
+- `invoice.cancel` is issuer-authenticated but does not call
+  `require_not_paused` (`contracts/invoice/src/lib.rs`, `cancel`). An issuer can
+  still cancel a `Created` invoice while the invoice contract is paused.
+- `invoice.upgrade` and `escrow.upgrade` are admin-only and do not call
+  `require_not_paused`. An admin can replace contract code while paused.
+
+`pool_factory` has no pause mechanism at all, so pool deployment and
+registration continue while the core contracts are paused.
+
+### Recovery and settlement paths
+
+| Situation | On-chain path | What actually happens |
+|-----------|---------------|-----------------------|
+| Buyer repays in full | `invoice.repay` → `invoice.repay_partial` → `escrow.release_to_pool` → `pool.receive_repayment_with_refund` | Buyer transfers `remaining_balance` to escrow; escrow sends `face_value` to the pool; pool credits the spread as yield and refunds any pro-rated early-payment amount to the buyer. |
+| Buyer repays partially | `invoice.repay_partial` | Buyer transfers `amount` to escrow; invoice stays `Funded`/`Active`/`Confirmed` and tracks `repaid_amount`/`remaining_balance`. Full repayment settles as above. |
+| Buyer repays before maturity | `invoice.repay_early` | Only for `Confirmed` invoices before `due_date`; the pool earns only the time-pro-rated discount and the rest is refunded to the buyer. |
+| Invoice reaches maturity | `invoice.trigger_default` (permissionless) | At `now >= due_date`, calls `pool.handle_default`; escrow returns the locked principal to the pool; invoice becomes `Defaulted`; `TotalFunded` falls, `TotalDeposits` is unchanged, and `TotalLossRealised` is incremented. |
+| Listing expires | `invoice.expire_listing` (issuer or admin) | At `now >= listed_at + expiry_window`, moves `Listed` → `Expired`. |
+| Invoice no longer needed | `invoice.cancel` (issuer) | Moves `Created` → `Cancelled`; not pause-guarded. |
+| Admin needs to fix code | `invoice.upgrade`, `escrow.upgrade` (admin) | Replaces the Wasm in place; storage and address stay the same. No timelock, no pause guard, and no on-chain review. |
+
+There is **no admin rescue function** for user funds. The only direct admin
+escape hatch is `escrow.handle_default(invoice_id, admin)`, which after the
+60-second lock grace period returns the locked principal to the configured pool
+and deletes the lock record. It does not update the invoice or pool accounting,
+so using it outside the normal `invoice.trigger_default → pool.handle_default`
+flow can desynchronise state.
+
+### Default timing details
+
+- `invoice.trigger_default` accepts `now >= due_date`; the equality boundary is
+  allowed (`contracts/invoice/src/lib.rs`, `trigger_default`).
+- `escrow.handle_default` separately requires
+  `now - record.locked_at >= DEFAULT_MIN_LOCK_SECONDS` (60 seconds). If an
+  invoice's `due_date` arrives less than 60 seconds after funding, default
+  reverts until that escrow grace period elapses, even though the invoice
+  due-date gate has passed.
+- Once an invoice is `Defaulted`, the buyer-facing repayment functions reject
+  it. There is no post-default cure window.
+
+### Issuer release gap
+
+`pool.fund_invoice` locks the discounted principal in escrow but never calls
+`escrow.release_to_issuer`. `release_to_issuer` requires pool authorization and
+the pool exposes no entry point that calls it, so the issuer payout path is not
+merely "manual" — it is currently unreachable. On a normal repayment, escrow
+releases `face_value` (funded principal plus buyer repayment) to the pool and
+deletes the lock record; the locked principal remains in escrow with no record
+to release it. On default, `escrow.handle_default` returns that same principal
+to the pool. See
+[LIMITATIONS.md](./LIMITATIONS.md#issuer-release-not-wired-issue-56).
+
+---
+
+## Token Assumptions
+
+- `pool` and `escrow` interact with the funding asset through
+  `soroban_sdk::token::Client` (`transfer`, and in `invoice.repay_partial`,
+  `try_transfer`). The asset must implement SEP-41 semantics and move exactly
+  the requested amount.
+- **Fee-on-transfer, rebasing, and hook-based tokens are not supported.**
+  `pool.deposit` credits `TotalDeposits` with the requested `usdc_amount` after
+  calling `transfer`; if the token delivers less than requested, pool
+  accounting overstates assets.
+- A token issuer that can freeze or blacklist accounts can block deposits,
+  withdrawals, funding, and repayments. The contracts have no fallback asset or
+  admin override for a frozen token.
+- The funding asset address is fixed per pool instance at `initialize` and is
+  not upgradeable. `invoice` has an admin-managed allow-list of funding assets
+  (`add_supported_asset`/`remove_supported_asset`); removing an asset prevents
+  new invoices but does not affect existing ones.
+- `pool` issues SEP-41 LP shares itself. Share `decimals` is supplied at
+  `initialize` and is not validated against the funding asset's decimals. The
+  deploy scripts use 7 decimals for the USDC pool.
+- The deploy scripts pass the `USDC_ISSUER` environment variable directly as
+  `usdc_asset`/`funding_asset`, despite the name. It must be the Stellar Asset
+  Contract (SAC) address for USDC, not the `G...` issuer account. See
+  [DEPLOYMENT.md](../DEPLOYMENT.md#environment-variables).
 
 ## Funding Authorization
 
@@ -366,22 +523,44 @@ pool it deploys. Upgrade events are emitted as `upgraded`
 invoice, escrow, pool, or factory admin gives that attacker the powers listed
 in [Blast Radius](#blast-radius-per-admin-key). The highest-impact paths are
 escrow upgrade (locked funds) and invoice upgrade/rewiring (repayment flows).
+The bundled deploy script also gives all roles to one deployer key, so a single
+compromise can affect the entire system.
 
-**Mitigation:**
-- Registry/invoice/pool ownership transfer needs the new admin too, so a
-  stolen key cannot unilaterally hand ownership to an attacker without that
-  new key signing. Registry's `transfer_admin` is an explicit exception.
-- On the pool factory the admin is the asset-registration trust boundary: it is
-  copied into every newly deployed pool as that pool's admin and treasury. A
-  factory ownership transfer therefore needs both signatures, and once it lands
-  the old key can no longer register assets or move ownership again.
+**What is actually protected:**
+
+- `registry`, `invoice`, and `pool` `transfer_ownership` require both the
+  current and new admin to sign.
+- `registry.transfer_admin` is a deliberate single-admin escape hatch, so the
+  dual-auth protection can be bypassed by the current admin.
+- `escrow` and `pool_factory` have no ownership-transfer entry point.
+- An admin cannot directly call `escrow.release_to_issuer` or
+  `release_to_pool`; those require the configured pool contract.
+- Direct token transfers out of the pool or escrow are not available as an
+  admin function.
 - Pool funding is permissionless, so compromising the pool admin does **not**
-  let the attacker choose which invoices receive capital; they can only pause,
-  change parameters, or transfer ownership.
+  let the attacker choose which invoices receive capital.
+- On the pool factory the admin is the asset-registration trust boundary: it is
+  copied into every newly deployed pool as that pool's admin and treasury.
 - Escrow `handle_default` accepts either the pool or the escrow admin, but it
   always returns funds to the pool, never to the caller.
-- **Gap:** There is no multisig, timelock, or dual control for pause or
-  upgrade. Escrow and factory admins cannot be rotated at all.
+
+**What is not protected:**
+
+- `invoice.upgrade` and `escrow.upgrade` let the admin replace the contract
+  code with any installed Wasm. That code can move escrowed funds or rewrite
+  invoice state. There is no timelock, pause guard, or on-chain approval.
+- The registry admin can revoke any profile, and `transfer_admin` can hand the
+  registry to an arbitrary address.
+- The pool admin can pause the pool indefinitely and set the protocol fee and
+  treasury (fee capped at 2000 bps).
+- `set_max_utilization` can be called by any account because the function does
+  not validate its `admin` argument against stored state.
+- There is no multisig, timelock, or dual control for pause or upgrade, and
+  escrow and factory admins cannot be rotated at all.
+
+**Mitigation:** Configure admin as a multisig account before deploying, keep
+signer keys separate, and treat invoice/escrow upgrades as the highest-risk
+operation. Multisig is an account-level control, not an on-chain timelock.
 
 ### 2. Cross-Contract Spoofing and Wiring
 
@@ -401,14 +580,18 @@ hostile address.
 - Pool, escrow, and factory wiring has no post-initialization setter. Invoice
   wiring can be changed only by the invoice admin, which is a high-trust
   operation; a hostile escrow address can intercept future buyer repayments.
+- The invoice's recorded `funding_pool` is used for `mark_defaulted`, so only
+  the pool that funded an invoice can persist its default status.
 
 ### 3. Dust Attack on Pool Shares
 
-**Risk:** After yield accrues, a tiny deposit can round down to zero shares.
+**Risk:** After yield accrues, a tiny deposit can round down to zero shares
+while the funding asset is still transferred into the pool.
 
 **Mitigation:** `deposit` rejects zero-share deposits with
 `PoolError::MinimumDeposit` before transferring tokens
-(`contracts/pool/src/lib.rs:565-630`).
+(`contracts/pool/src/lib.rs:565-630`), and `withdraw` rejects a redemption that
+would return 0 units.
 
 ### 4. Replay of State Transitions
 
@@ -417,10 +600,13 @@ hostile address.
 **Mitigation:** Status gates and idempotency keys cover the transitions:
 `list_for_financing` requires `Created`; `mark_funded` requires `Listed`;
 `mark_shipped` requires `Funded`; `confirm_delivery` requires `Active`;
-`repay`/`repay_early` require a repayable status; `trigger_default` requires
-`Funded`/`Active`/`Confirmed` and a passed due date. A `FundedInvoice` entry
-prevents double-funding, and escrow rejects an existing lock with
-`AlreadyLocked`.
+`repay`/`repay_partial` require `Funded`/`Active`/`Confirmed` and
+`repay_early` requires `Confirmed` before `due_date`; `trigger_default`
+requires `Funded`/`Active`/`Confirmed` and a passed due date;
+`expire_listing` requires `Listed`; `cancel` requires `Created`. A
+`FundedInvoice` entry prevents double-funding, and escrow rejects an existing
+lock with `AlreadyLocked`. The escrow lock record is removed on a successful
+release or default, so a second call fails with `NotFound`.
 
 #### Attestation replay and domain separation
 
@@ -454,8 +640,11 @@ migration note, and resource profile are in
 
 **Mitigation:** Amounts are `u128` with `overflow-checks = true` in the
 release profile. Funding scaling, utilization, repayments, withdrawals, and
-default accounting use checked arithmetic or documented saturation; see
-`contracts/pool/src/lib.rs:1229-1257` and `:1560-1577`.
+default accounting use checked arithmetic or documented saturation
+(`receive_repayment` validates `amount >= funded_amount`; withdrawals validate
+share and liquidity bounds; default accounting uses `checked_sub` and leaves
+`TotalDeposits` unchanged so returning escrowed principal does not double-count
+the loss). See `contracts/pool/src/lib.rs:1229-1257` and `:1560-1577`.
 
 ### 6. Front-Running on Invoice Expiry
 
@@ -508,7 +697,11 @@ escrow code while paused and change all invariants.
 **Mitigation:** None on-chain beyond the requirement that the admin key signs.
 These are documented centralization risks, not solved problems.
 
-### 9. Hostile or Non-Conforming Funding Asset
+**Default is irreversible.** Once `trigger_default` succeeds,
+`repay`/`repay_partial`/`repay_early` reject the invoice, and there is no grace
+period after `due_date` beyond the escrow's 60-second minimum lock window.
+
+### 11. Hostile or Non-Conforming Funding Asset
 
 **Risk:** A pool's configured funding asset is an external SAC contract. If
 its `transfer` fails, or if a caller supplies an amount outside the token's
@@ -554,6 +747,8 @@ read on the hot path.
 | Centralized registry | Registry admin is the sole verifier and can revoke/reinstate | Multisig registry administration / governance |
 | Factory controls new pools | Factory admin supplies the pool Wasm and becomes each new pool's admin and treasury | Review/verify Wasm hash and use a governed factory admin |
 | Optional agent-registry dependency | Listing requires an attestation from an underwrite agent registry configured by the invoice admin | Multisig configuration + audited agent registry |
+| Utilization cap auth | `set_max_utilization` accepts a caller-supplied admin | Any caller can change the cap within the 1..=10,000 bps range; see Pattern B |
+| Registry ownership escape hatch | `registry.transfer_admin` is single-auth | Bypasses `transfer_ownership` dual auth |
 
 ### Blast Radius Per Admin Key
 
@@ -569,6 +764,10 @@ Issuers, buyers, and LPs cannot pause, upgrade, or change parameters. An
 issuer can only affect its own invoices; a buyer can only repay or confirm; an
 LP can only move its own shares. The anonymous caller can trigger permissionless
 funding/default/attestation but cannot choose amounts or recipients.
+
+The upgrade capability dominates this table: an escrow admin can replace the
+escrow code and then move funds through the new code, so a compromised escrow
+admin key should be treated as a total-loss scenario for escrowed balances.
 
 ---
 
@@ -598,9 +797,15 @@ arbitrary recipient and a replayed release finds no lock record.
 
 ### TTL Management
 
-Every `persistent().set()` is followed by an `extend_ttl()` call with the
-workspace thresholds, and instance storage is extended on state-changing
-calls. See [STORAGE.md](./STORAGE.md) for the key schema and TTL parameters.
+All storage TTL bumps go through `clearledger-ttl` constants:
+`THRESHOLD = 500_000` ledgers and `EXTEND_TO = 2_000_000` ledgers
+(`contracts/ttl/src/lib.rs`). Persistent entries are extended on write; instance
+storage is extended by each contract's `extend_instance_ttl()` helper on
+state-changing calls.
+
+See [STORAGE.md](./STORAGE.md) for the storage key schema. That document's
+TTL table is older than the shared constants; the values above are the ones the
+contracts actually use.
 
 ### External Dependencies
 
@@ -623,9 +828,12 @@ The following are explicitly outside this threat model:
 - **Funding-asset issuer powers** (freeze, mint, clawback) and other token
   contract behaviour.
 - **Freighter / wallet vulnerabilities** — report to the wallet team.
-- **Frontend phishing or social engineering.**
+- **Frontend phishing or social engineering** — users are responsible for
+  verifying transaction details before signing.
 - **Off-chain indexer downtime** — contracts function independently of the
   indexer; missed events do not affect fund safety.
+- **The external agent registry** (`underwrite-contract`) — its own admin,
+  agent set, and verification logic are outside this repository's boundary.
 - **Testnet-only risks** (Friendbot dust, ephemeral validators, state resets)
   — see [LIMITATIONS.md](./LIMITATIONS.md).
 
