@@ -374,6 +374,7 @@ impl EscrowContract {
             .persistent()
             .get(&key)
             .unwrap_or_else(|| panic_with_error!(&env, EscrowError::NotFound));
+        let remaining = record.amount.saturating_sub(repayment_amount);
 
         let usdc = Self::usdc_client(&env);
         usdc.transfer(
@@ -401,7 +402,7 @@ impl EscrowContract {
             env.storage().persistent().remove(&key);
         }
         Self::extend_instance_ttl(&env);
-        events::released_to_pool(&env, &invoice_id, &pool, repayment_amount);
+        events::released_to_pool(&env, &invoice_id, &pool, repayment_amount, remaining);
         true
     }
 
