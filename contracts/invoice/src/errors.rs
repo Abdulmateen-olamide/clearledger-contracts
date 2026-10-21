@@ -37,7 +37,9 @@ pub enum InvoiceError {
     /// [`MAX_BATCH_SIZE`](crate::MAX_BATCH_SIZE), which would defeat the
     /// per-call cost bound batching exists to provide.
     BatchSizeExceeded = 28,
-    // Discriminants 29 and 30 are reserved for issue #83.
+    /// The signed attestation is expired or has expired before listing.
+    AttestationExpired = 29,
+    // Discriminant 30 is reserved for issue #83.
     /// `get_funded_amount` was called for an invoice that exists but has not
     /// been funded yet. The committed amount is only meaningful once
     /// `mark_funded` has recorded it, so callers get a distinct error instead

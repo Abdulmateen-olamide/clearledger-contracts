@@ -295,6 +295,20 @@ use clearledger_test_utils::{test_agent_pubkey, test_agent_signing_key};
 /// signed attestation for `invoice_id`. Centralizes the plumbing so
 /// individual tests can just call this right before `list_for_financing`.
 fn attest(env: &Env, client: &InvoiceContractClient, invoice_id: &BytesN<32>) {
+    attest_with_expiry(
+        env,
+        client,
+        invoice_id,
+        env.ledger().timestamp() + 3_600,
+    );
+}
+
+fn attest_with_expiry(
+    env: &Env,
+    client: &InvoiceContractClient,
+    invoice_id: &BytesN<32>,
+    expires_at: u64,
+) {
     let agent_id = Symbol::new(env, "test_agent");
     let registry_id = env.register_contract(None, MockAgentRegistry);
     let registry_client = MockAgentRegistryClient::new(env, &registry_id);
@@ -314,6 +328,7 @@ fn attest(env: &Env, client: &InvoiceContractClient, invoice_id: &BytesN<32>) {
         evidence_hash: BytesN::from_array(env, &[9u8; 32]),
         agent_id,
         nonce: 1,
+        expires_at,
     };
     let payload_bytes = payload.to_xdr(env);
     let digest = env.crypto().keccak256(&payload_bytes).to_array();
@@ -443,6 +458,7 @@ fn test_submit_attestation_untrusted_signer_wrong_pubkey() {
         evidence_hash: BytesN::from_array(&env, &[9u8; 32]),
         agent_id,
         nonce: 1,
+        expires_at: env.ledger().timestamp() + 3_600,
     };
     let payload_bytes = payload.to_xdr(&env);
     let digest = env.crypto().keccak256(&payload_bytes).to_array();
@@ -487,6 +503,7 @@ fn test_submit_attestation_inactive_agent() {
         evidence_hash: BytesN::from_array(&env, &[9u8; 32]),
         agent_id,
         nonce: 1,
+        expires_at: env.ledger().timestamp() + 3_600,
     };
     let payload_bytes = payload.to_xdr(&env);
     let digest = env.crypto().keccak256(&payload_bytes).to_array();
@@ -522,6 +539,7 @@ fn test_submit_attestation_unregistered_agent() {
         evidence_hash: BytesN::from_array(&env, &[9u8; 32]),
         agent_id,
         nonce: 1,
+        expires_at: env.ledger().timestamp() + 3_600,
     };
     let payload_bytes = payload.to_xdr(&env);
     let digest = env.crypto().keccak256(&payload_bytes).to_array();
@@ -566,6 +584,7 @@ fn test_submit_attestation_replay_rejection() {
         evidence_hash: BytesN::from_array(&env, &[10u8; 32]),
         agent_id,
         nonce: 2,
+        expires_at: env.ledger().timestamp() + 3_600,
     };
     let payload_bytes = payload.to_xdr(&env);
     let digest = env.crypto().keccak256(&payload_bytes).to_array();
@@ -613,6 +632,7 @@ fn test_submit_attestation_domain_separator_mismatch() {
         evidence_hash: BytesN::from_array(&env, &[9u8; 32]),
         agent_id,
         nonce: 1,
+        expires_at: env.ledger().timestamp() + 3_600,
     };
     let payload_bytes = payload.to_xdr(&env);
     let digest = env.crypto().keccak256(&payload_bytes).to_array();
@@ -655,6 +675,7 @@ fn test_submit_attestation_invoice_id_mismatch() {
         evidence_hash: BytesN::from_array(&env, &[9u8; 32]),
         agent_id,
         nonce: 1,
+        expires_at: env.ledger().timestamp() + 3_600,
     };
     let payload_bytes = payload.to_xdr(&env);
     let digest = env.crypto().keccak256(&payload_bytes).to_array();
@@ -1033,6 +1054,7 @@ fn test_submit_attestation_nonexistent_invoice() {
         evidence_hash: BytesN::from_array(&env, &[9u8; 32]),
         agent_id,
         nonce: 1,
+        expires_at: env.ledger().timestamp() + 3_600,
     };
     let payload_bytes = payload.to_xdr(&env);
     let digest = env.crypto().keccak256(&payload_bytes).to_array();
@@ -5407,6 +5429,7 @@ fn attest_no_mock_auth(env: &Env, client: &InvoiceContractClient, invoice_id: &B
         evidence_hash: BytesN::from_array(env, &[9u8; 32]),
         agent_id,
         nonce: 1,
+        expires_at: env.ledger().timestamp() + 3_600,
     };
     let payload_bytes = payload.to_xdr(env);
     let digest = env.crypto().keccak256(&payload_bytes).to_array();

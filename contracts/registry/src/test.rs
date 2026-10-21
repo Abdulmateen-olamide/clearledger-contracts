@@ -2030,8 +2030,9 @@ fn test_revoke_with_reason_emits_explicit_reason_code() {
         )
             .into_val(&env)
     );
-    assert_eq!(event.2, RevocationReason::Fraud.into_val(&env));
-    assert_eq!(event.2, 2u32.into_val(&env));
+    let emitted: u32 = u32::try_from_val(&env, &event.2).unwrap();
+    assert_eq!(emitted, RevocationReason::Fraud as u32);
+    assert_eq!(emitted, 2u32);
 }
 
 #[test]
@@ -2045,7 +2046,7 @@ fn test_revocation_reason_discriminants_are_stable() {
         (RevocationReason::Other, 4u32),
     ];
     for (reason, code) in cases {
-        assert_eq!(reason.into_val(&env), code.into_val(&env));
+        assert_eq!(reason as u32, code);
     }
 }
 
