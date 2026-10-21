@@ -1,6 +1,6 @@
 # Limitations
 
-> **Updated:** 2026-09-30
+> **Updated:** 2026-10-20
 > **Applies to:** ClearLedger protocol on Stellar testnet
 
 This document captures known limitations, testnet-specific constraints,
@@ -221,6 +221,19 @@ withdrawal. The regression test in `contracts/pool/src/test.rs` covers this
 scenario. Per-deposit lots would be required if the protocol needs a specific
 FIFO/HIFO tax or reporting policy.
 
+### Pool `set_max_utilization` Auth Is Caller-Controlled
+
+`pool::set_max_utilization(admin, new_cap_bps)` calls
+`admin.require_auth()` on the caller-supplied `admin` argument but never
+compares it to the stored pool admin
+(`contracts/pool/src/lib.rs:1914-1926`). Any account that signs its own call
+can raise or lower the utilization cap, despite the function's doc comment
+saying it requires the contract admin. The regression test
+`test_set_max_utilization_requires_admin_authorization`
+(`contracts/pool/src/test.rs:1530`) only covers an unsigned non-admin. Treat
+the cap as caller-controlled until the contract compares the argument to
+`DataKey::Admin`.
+
 ### Issuer Release Not Wired (Issue #56)
 
 After `fund_invoice` locks USDC in escrow, the pooled funds should be
@@ -296,8 +309,11 @@ are provided where available.
 - Formal verification or symbolic execution audit
 - `cargo-soroban` integration for automated WASM budget reporting
 - TypeScript SDK for contract interaction
-- Automated fuzz testing across all four contracts
-- Smart-contract upgrade mechanism (`__constructor` + `__upgrade`)
+- Automated fuzz testing across all deployed contracts
+- Timelocked or multisig contract upgrades. Admin-only `upgrade` entry points
+  already exist on `invoice` and `escrow`; `registry`, `pool`, and
+  `pool_factory` are not upgradeable through a contract entry point. See
+  [THREAT_MODEL.md](./THREAT_MODEL.md#upgrade-powers).
 
 > **Note:** Partial repayments are now supported on the **escrow** path
 > (`escrow::release_to_pool(invoice_id, repayment_amount)` accepts a
