@@ -371,6 +371,10 @@ escrow upgrade (locked funds) and invoice upgrade/rewiring (repayment flows).
 - Registry/invoice/pool ownership transfer needs the new admin too, so a
   stolen key cannot unilaterally hand ownership to an attacker without that
   new key signing. Registry's `transfer_admin` is an explicit exception.
+- On the pool factory the admin is the asset-registration trust boundary: it is
+  copied into every newly deployed pool as that pool's admin and treasury. A
+  factory ownership transfer therefore needs both signatures, and once it lands
+  the old key can no longer register assets or move ownership again.
 - Pool funding is permissionless, so compromising the pool admin does **not**
   let the attacker choose which invoices receive capital; they can only pause,
   change parameters, or transfer ownership.
